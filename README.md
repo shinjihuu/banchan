@@ -47,7 +47,7 @@ streamlit run app.py
 
 ## 링크 공유 미리보기 (대표 사진·문구)
 Streamlit Cloud 주소(`banchan-sarang.streamlit.app`)는 미리보기를 바꿀 수 없어서,
-`docs/index.html` 안내 페이지(대표 사진 `docs/og.jpg`, 문구 "수봉산 인도사랑 반찬가게입니다")를 GitHub Pages로 띄우고
+`docs/index.html` 안내 페이지(대표 사진 `docs/og-2.jpg`, 문구 "수봉산 인도사랑 반찬가게입니다 💒")를 GitHub Pages로 띄우고
 열면 바로 앱으로 이동하게 했습니다.
 
 - 켜는 법: GitHub 저장소 **Settings → Pages → Build and deployment** → Source: `Deploy from a branch`, Branch: `main` / `/docs` → Save
