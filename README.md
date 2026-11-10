@@ -50,6 +50,7 @@ Streamlit Cloud 주소(`indosarang-banchan.streamlit.app`)는 미리보기를 �
 `netlify/` 폴더의 안내 페이지(대표 사진 `og-2.jpg`, 문구 "수봉산 인도사랑 반찬가게입니다 💒")를 Netlify에 올리고
 열면 바로 앱으로 이동하게 했습니다.
 
-- 공유할 링크: **https://indosarang-banchan.netlify.app/**
+- 공유할 링크: **https://shinjihuu.github.io/banchan/** (GitHub Pages: Settings → Pages → `main` / `/docs`, 파일은 `docs/`)
+- (보조) Netlify 버전: https://indosarang-banchan.netlify.app/ (`netlify/` 폴더)
 - 올리는 법: https://app.netlify.com/drop 에 `netlify` 폴더를 끌어다 놓기 → Site configuration → Change site name → `indosarang-banchan`
 - 앱 주소가 바뀌면 `netlify/index.html` 안의 `indosarang-banchan.streamlit.app` 3곳을 바꾼 뒤 다시 올려 주세요.
