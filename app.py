@@ -102,6 +102,7 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     for col in ["주문번호", "주문시간", "전도회", "이름"]:
         df[col] = df[col].fillna("").astype(str).str.strip()
     df = df[df[DISHES].sum(axis=1) > 0]  # 수량이 0인 주문은 제거
+    df = df[df["전도회"].isin(GROUPS) & (df["이름"] != "")]  # 전도회·이름 없는 주문은 제거
     df["금액"] = df[DISHES].sum(axis=1).astype(int) * PRICE
     return df.reset_index(drop=True)
 
@@ -121,7 +122,22 @@ def write_orders(df: pd.DataFrame) -> None:
     tmp.replace(DATA_FILE)
 
 
+def order_problems(group: str | None, name: str, cart: dict[str, int]) -> list[str]:
+    """주문 전 필수값 확인. 빠진 항목 이름 목록을 돌려줌 (비어 있으면 통과)."""
+    problems = []
+    if group not in GROUPS:
+        problems.append("전도회")
+    if not (name or "").strip():
+        problems.append("이름")
+    if sum(int(v) for v in cart.values()) <= 0:
+        problems.append("반찬")
+    return problems
+
+
 def add_order(group: str, name: str, cart: dict[str, int]) -> dict:
+    name = (name or "").strip()
+    if order_problems(group, name, cart):  # 화면을 우회해도 저장되지 않도록 서버에서 한 번 더 확인
+        raise ValueError("전도회, 이름, 반찬은 필수입니다.")
     order = {
         "주문번호": uuid.uuid4().hex[:6].upper(),
         "주문시간": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
@@ -266,6 +282,7 @@ st.markdown(
       [class*="st-key-card_"] { padding-bottom: 14px !important; }
       .dish-name { font-weight: 700; font-size: 1.05rem; color: #4A3B2A; word-break: keep-all; overflow-wrap: anywhere; line-height: 1.3; }
       .dish > div:last-child { min-width: 0; }
+      .field-error { color: #C0392B; font-size: .85rem; font-weight: 700; margin: -.4rem 0 .4rem .2rem; }
       .notice { margin-top: .8rem; padding: .7rem .9rem; border-radius: 14px; background: #FDEBD3;
                 border: 1px dashed #D9A06C; color: #8A4A22; font-weight: 700; text-align: center; font-size: .95rem; word-break: keep-all; }
       .qty { min-width: 1.6em; font-size: 1.25rem; font-weight: 700; color: #4A3B2A; text-align: center; }
@@ -422,12 +439,19 @@ def order_page() -> None:
 
     # 1. 주문자
     step(1, "주문하시는 분")
+    tried = ss.get("tried_order", False)
     with st.container(key="who"):
         group = st.selectbox(
-            "전도회", GROUPS, index=None, placeholder="전도회를 선택해 주세요",
+            "전도회 (필수)", GROUPS, index=None, placeholder="전도회를 선택해 주세요",
             format_func=group_label, key=f"group_{ss.form_ver}",
         )
-        name = st.text_input("이름", placeholder="이름을 입력해 주세요", key=f"name_{ss.form_ver}").strip()
+        if tried and not group:
+            html('<div class="field-error">⚠️ 전도회를 선택해 주세요.</div>')
+        name = st.text_input(
+            "이름 (필수)", placeholder="이름을 입력해 주세요", max_chars=20, key=f"name_{ss.form_ver}"
+        ).strip()
+        if tried and not name:
+            html('<div class="field-error">⚠️ 이름을 입력해 주세요.</div>')
 
     # 2. 반찬 담기 (한 줄에 하나씩)
     step(2, "반찬 담기")
@@ -467,19 +491,24 @@ def order_page() -> None:
             html(f'{lines}<div class="cart-total"><span>총 {total_qty}개</span><span>{total_qty * PRICE:,}원</span></div>')
         html(f'<div class="notice">📢 {PICKUP_NOTICE}</div>')
 
-    missing = [label for label, ok in (("전도회", group), ("이름", name), ("반찬", total_qty)) if not ok]
-    if missing:
-        st.caption(f"✋ {', '.join(missing)}을(를) 입력하면 주문할 수 있어요.")
+    missing = order_problems(group, name, ss.cart)
+    if tried and missing:
+        st.error(f"**{', '.join(missing)}**을(를) 입력해야 주문할 수 있어요.", icon="✋")
 
+    # 버튼은 항상 누를 수 있게 두고, 누를 때 확인 (폰에서 입력 직후 첫 탭이 무시되는 문제 방지)
     with st.container(key="order_bar"):
         clicked = st.button(
             f"🙏 {total_qty}개 · {total_qty * PRICE:,}원 주문하기" if total_qty else "🧺 반찬을 담아 주세요",
-            type="primary", width="stretch", disabled=bool(missing),
+            type="primary", width="stretch",
         )
     if clicked:
+        if missing:
+            ss.tried_order = True
+            st.rerun()
         ss.last_order = add_order(group, name, ss.cart)
         ss.cart = {d: 0 for d in DISHES}
         ss.form_ver += 1
+        ss.tried_order = False
         st.balloons()
         st.rerun()
 
@@ -559,11 +588,17 @@ def admin_page() -> None:
             disabled=["주문번호", "주문시간", "금액"],
             column_config={
                 "전도회": st.column_config.SelectboxColumn("전도회", options=GROUPS, required=True),
+                "이름": st.column_config.TextColumn("이름", required=True, max_chars=20),
                 **{d: st.column_config.NumberColumn(d, min_value=0, step=1, format="%d") for d in DISHES},
                 "금액": st.column_config.NumberColumn("금액(원)", format="localized"),
             },
         )
         if st.button("💾 저장", type="primary", width="stretch"):
+            e = edited.fillna("")
+            bad = e[~e["전도회"].isin(GROUPS) | (e["이름"].astype(str).str.strip() == "")]
+            if not bad.empty:
+                st.error(f"전도회 또는 이름이 비어 있는 주문이 {len(bad)}건 있어요. 채운 뒤 저장해 주세요.")
+                st.stop()
             with file_lock():
                 # 편집하는 동안 새로 들어온 주문은 그대로 유지
                 latest = load_orders()
