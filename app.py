@@ -37,12 +37,17 @@ IMAGE_DIR = Path(__file__).parent / "images"
 
 
 @st.cache_data
+def _encode_image(path: str, mtime: float, mime: str) -> str:
+    # mtime이 캐시 키에 들어가므로, 사진을 바꾸거나 새로 올리면 자동으로 다시 읽음
+    return f"data:image/{mime};base64," + base64.b64encode(Path(path).read_bytes()).decode()
+
+
 def dish_image(slug: str) -> str | None:
     """images/ 폴더의 반찬 사진을 data URI로 (없으면 None)."""
     for ext, mime in ((".png", "png"), (".webp", "webp"), (".jpg", "jpeg"), (".jpeg", "jpeg")):
         f = IMAGE_DIR / f"{slug}{ext}"
         if f.exists():
-            return f"data:image/{mime};base64," + base64.b64encode(f.read_bytes()).decode()
+            return _encode_image(str(f), f.stat().st_mtime, mime)
     return None
 
 
@@ -254,11 +259,10 @@ st.markdown(
       [class*="st-key-card_"] { padding-bottom: 14px !important; }
       .dish-name { font-weight: 700; font-size: .95rem; color: #4A3B2A; word-break: keep-all; overflow-wrap: anywhere; line-height: 1.3; }
       .dish > div:last-child { min-width: 0; }
-      .dish-desc { font-size: .78rem; color: #8A6B4E; word-break: keep-all; line-height: 1.3; }
-      .dish-price { font-size: .9rem; color: #B5563C; font-weight: 700; }
+      .dish-desc { font-size: .82rem; color: #8A6B4E; word-break: keep-all; line-height: 1.3; }
       .qty { min-width: 1.6em; font-size: 1.25rem; font-weight: 700; color: #4A3B2A; text-align: center; }
       .in-cart { display: inline-block; font-size: .72rem; padding: 1px 8px; border-radius: 999px;
-                 background: #E8F1D9; color: #4F7A2B; margin-left: .3rem; vertical-align: middle; }
+                 background: #E8F1D9; color: #4F7A2B; margin-top: .25rem; vertical-align: middle; }
 
       /* +/- 버튼: 동그랗게 */
       [class*="st-key-minus_"] button, [class*="st-key-plus_"] button {
@@ -419,7 +423,7 @@ def order_page() -> None:
         with st.container(key=f"card_{i}"):
             info, minus, num, plus = st.columns([6, 1, 1, 1], vertical_alignment="center")
             with info:
-                badge = '<span class="in-cart">담김</span>' if qty else ""
+                badge = '<div><span class="in-cart">🧺 담김</span></div>' if qty else ""
                 html(
                     f"""
                     <div class="dish">
@@ -427,7 +431,7 @@ def order_page() -> None:
                       <div>
                         <div class="dish-name">{dish}</div>
                         <div class="dish-desc">{desc}</div>
-                        <div class="dish-price">{PRICE:,}원 {badge}</div>
+                        {badge}
                       </div>
                     </div>
                     """
