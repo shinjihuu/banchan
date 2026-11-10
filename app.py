@@ -11,7 +11,6 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from theme import CHURCH_BANNER
 
 # ----------------------------------------------------------------------------
 # 설정
@@ -20,16 +19,19 @@ PRICE = 10_000  # 반찬 1개당 가격 (원)
 
 GROUPS = [str(n) for n in range(4, 17)] + ["결새모"]  # 4 ~ 16, 결새모
 
-# 반찬 이름: (아이콘, 한 줄 소개, 사진 파일 이름)
+APP_NAME = "인도사랑 반찬가게"
+PICKUP_NOTICE = "금요철야 예배 후까지 꼭 수령해주세요!"
+
+# 반찬 이름: (아이콘, 화면에 보일 이름(<br>로 줄바꿈), 사진 파일 이름)
 # 사진은 images/<파일이름>.png (누끼 딴 투명 PNG) 에 두면 아이콘 대신 보입니다.
 MENU = {
-    "총각김치": ("🥬", "아삭하게 잘 익은 총각김치", "kimchi"),
-    "새송이버섯계란장조림": ("🍳", "짭조름 달큰한 버섯·계란 장조림", "jangjorim"),
-    "제육볶음": ("🍖", "매콤달콤 불향 가득 제육볶음", "jeyuk"),
+    "총각김치": ("🥬", "총각김치", "kimchi"),
+    "새송이버섯계란장조림": ("🍳", "새송이버섯<br>계란장조림", "jangjorim"),
+    "제육볶음": ("🍖", "제육볶음", "jeyuk"),
 }
 DISHES = list(MENU)
 
-COLUMNS = ["주문번호", "주문시간", "전도회", "이름", *DISHES, "금액", "요청사항"]
+COLUMNS = ["주문번호", "주문시간", "전도회", "이름", *DISHES, "금액"]
 
 DATA_FILE = Path(os.environ.get("BANCHAN_DATA_FILE", Path(__file__).parent / "orders.csv"))
 KST = ZoneInfo("Asia/Seoul")
@@ -40,6 +42,13 @@ IMAGE_DIR = Path(__file__).parent / "images"
 def _encode_image(path: str, mtime: float, mime: str) -> str:
     # mtime이 캐시 키에 들어가므로, 사진을 바꾸거나 새로 올리면 자동으로 다시 읽음
     return f"data:image/{mime};base64," + base64.b64encode(Path(path).read_bytes()).decode()
+
+
+def image_uri(f: Path) -> str | None:
+    mime = {".png": "png", ".webp": "webp", ".jpg": "jpeg", ".jpeg": "jpeg"}.get(f.suffix.lower())
+    if mime and f.exists():
+        return _encode_image(str(f), f.stat().st_mtime, mime)
+    return None
 
 
 def dish_image(slug: str) -> str | None:
@@ -90,7 +99,7 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     df = df[COLUMNS]
     for col in DISHES:
         df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).clip(lower=0).astype(int)
-    for col in ["주문번호", "주문시간", "전도회", "이름", "요청사항"]:
+    for col in ["주문번호", "주문시간", "전도회", "이름"]:
         df[col] = df[col].fillna("").astype(str).str.strip()
     df = df[df[DISHES].sum(axis=1) > 0]  # 수량이 0인 주문은 제거
     df["금액"] = df[DISHES].sum(axis=1).astype(int) * PRICE
@@ -112,14 +121,13 @@ def write_orders(df: pd.DataFrame) -> None:
     tmp.replace(DATA_FILE)
 
 
-def add_order(group: str, name: str, cart: dict[str, int], note: str) -> dict:
+def add_order(group: str, name: str, cart: dict[str, int]) -> dict:
     order = {
         "주문번호": uuid.uuid4().hex[:6].upper(),
         "주문시간": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
         "전도회": group,
         "이름": name,
         **{d: int(cart.get(d, 0)) for d in DISHES},
-        "요청사항": note,
     }
     with file_lock():
         df = load_orders()
@@ -202,7 +210,7 @@ def to_excel(df: pd.DataFrame) -> bytes:
 # ----------------------------------------------------------------------------
 # 스타일 (휴대폰 세로 화면 기준)
 # ----------------------------------------------------------------------------
-st.set_page_config(page_title="사랑의 반찬 나눔", page_icon="⛪", layout="centered")
+st.set_page_config(page_title=APP_NAME, page_icon="🍱", layout="centered")
 
 st.markdown(
     """
@@ -220,11 +228,10 @@ st.markdown(
 
       /* 배너 */
       .hero { position: relative; margin-bottom: .8rem; box-shadow: 0 10px 26px rgba(170,120,60,.18); border-radius: 22px; overflow: hidden; }
-      .hero svg { height: 170px !important; border-radius: 0 !important; }
+      .hero img { display: block; width: 100%; height: auto; }
       .hero-text { background: #FFFDF7; padding: 12px 18px 14px; text-align: center; border-top: 1px solid #F1E2C8; }
       .hero-title { font-family: 'Gowun Batang', serif; font-size: 1.55rem; font-weight: 700; color: #6B4A2B; line-height: 1.3; }
       .hero-sub { margin-top: .15rem; font-size: .88rem; color: #8A5A3B; }
-      .verse { text-align: center; color: #8A6B4E; font-size: .85rem; margin: 0 0 1rem; }
 
       .step { display: flex; align-items: center; gap: .5rem; margin: 1.2rem 0 .5rem;
               font-family: 'Gowun Batang', serif; font-size: 1.12rem; color: #6B4A2B; font-weight: 700; }
@@ -257,9 +264,10 @@ st.markdown(
       .mini img { width: 26px; height: 26px; object-fit: contain; }
       [class*="st-key-card_"] [data-testid="stMarkdownContainer"] { margin-bottom: 0 !important; }
       [class*="st-key-card_"] { padding-bottom: 14px !important; }
-      .dish-name { font-weight: 700; font-size: .95rem; color: #4A3B2A; word-break: keep-all; overflow-wrap: anywhere; line-height: 1.3; }
+      .dish-name { font-weight: 700; font-size: 1.05rem; color: #4A3B2A; word-break: keep-all; overflow-wrap: anywhere; line-height: 1.3; }
       .dish > div:last-child { min-width: 0; }
-      .dish-desc { font-size: .82rem; color: #8A6B4E; word-break: keep-all; line-height: 1.3; }
+      .notice { margin-top: .8rem; padding: .7rem .9rem; border-radius: 14px; background: #FDEBD3;
+                border: 1px dashed #D9A06C; color: #8A4A22; font-weight: 700; text-align: center; font-size: .95rem; word-break: keep-all; }
       .qty { min-width: 1.6em; font-size: 1.25rem; font-weight: 700; color: #4A3B2A; text-align: center; }
       .in-cart { display: inline-block; font-size: .72rem; padding: 1px 8px; border-radius: 999px;
                  background: #E8F1D9; color: #4F7A2B; margin-top: .25rem; vertical-align: middle; }
@@ -307,7 +315,6 @@ st.markdown(
       .person { display: flex; justify-content: space-between; gap: .6rem; padding: .5rem 0; border-top: 1px dashed #EEDCBF; font-size: .92rem; }
       .person .who { font-weight: 700; color: #4A3B2A; white-space: nowrap; }
       .person .what { color: #6B4A2B; text-align: right; word-break: keep-all; }
-      .person .note { display: block; color: #A08A70; font-size: .8rem; }
       footer, #MainMenu, [data-testid="stToolbar"] { visibility: hidden; }
     </style>
     """,
@@ -324,8 +331,15 @@ def esc(text: str) -> str:
     return (str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
-def hero(title: str, subtitle: str) -> None:
-    html(f'<div class="hero">{CHURCH_BANNER}<div class="hero-text"><div class="hero-title">{title}</div><div class="hero-sub">{subtitle}</div></div></div>')
+def hero(title: str | None = None, subtitle: str = "") -> None:
+    """맨 위 포스터 배너. title을 주면 아래에 제목 띠를 붙임."""
+    src = image_uri(IMAGE_DIR / "banner.webp")
+    banner = f'<img src="{src}" alt="{APP_NAME}">' if src else ""
+    band = (
+        f'<div class="hero-text"><div class="hero-title">{title}</div><div class="hero-sub">{subtitle}</div></div>'
+        if title else ""
+    )
+    html(f'<div class="hero">{banner}{band}</div>')
 
 
 def step(num: int | str, text: str) -> None:
@@ -389,6 +403,7 @@ def order_done() -> None:
             </div>
             {lines}
             <div class="cart-total"><span>총 금액</span><span>{o['금액']:,}원</span></div>
+            <div class="notice">📢 {PICKUP_NOTICE}</div>
             """
         )
     st.write("")
@@ -398,8 +413,7 @@ def order_done() -> None:
 
 
 def order_page() -> None:
-    hero("사랑의 반찬 나눔", f"모든 반찬 한 개 {PRICE:,}원")
-    html('<div class="verse">“주는 것이 받는 것보다 복이 있다” · 행 20:35</div>')
+    hero()
 
     if ss.last_order:
         order_done()
@@ -418,7 +432,7 @@ def order_page() -> None:
     # 2. 반찬 담기 (한 줄에 하나씩)
     step(2, "반찬 담기")
     for i, dish in enumerate(DISHES):
-        desc = MENU[dish][1]
+        label = MENU[dish][1]
         qty = ss.cart[dish]
         with st.container(key=f"card_{i}"):
             info, minus, num, plus = st.columns([6, 1, 1, 1], vertical_alignment="center")
@@ -429,8 +443,7 @@ def order_page() -> None:
                     <div class="dish">
                       {dish_visual(dish)}
                       <div>
-                        <div class="dish-name">{dish}</div>
-                        <div class="dish-desc">{desc}</div>
+                        <div class="dish-name">{label}</div>
                         {badge}
                       </div>
                     </div>
@@ -452,7 +465,7 @@ def order_page() -> None:
                 for d, n in ss.cart.items() if n
             )
             html(f'{lines}<div class="cart-total"><span>총 {total_qty}개</span><span>{total_qty * PRICE:,}원</span></div>')
-        note = st.text_input("요청사항 (선택)", placeholder="예) 주일 2부 예배 후 수령", key=f"note_{ss.form_ver}")
+        html(f'<div class="notice">📢 {PICKUP_NOTICE}</div>')
 
     missing = [label for label, ok in (("전도회", group), ("이름", name), ("반찬", total_qty)) if not ok]
     if missing:
@@ -464,7 +477,7 @@ def order_page() -> None:
             type="primary", width="stretch", disabled=bool(missing),
         )
     if clicked:
-        ss.last_order = add_order(group, name, ss.cart, note.strip())
+        ss.last_order = add_order(group, name, ss.cart)
         ss.cart = {d: 0 for d in DISHES}
         ss.form_ver += 1
         st.balloons()
@@ -514,10 +527,9 @@ def admin_page() -> None:
             people = ""
             for _, r in part.iterrows():
                 items = " · ".join(f"{d} {r[d]}" for d in DISHES if r[d])
-                note = f'<span class="note">💬 {esc(r["요청사항"])}</span>' if r["요청사항"] else ""
                 people += (
                     f'<div class="person"><span class="who">{esc(r["이름"])}</span>'
-                    f'<span class="what">{items} · <b>{r["금액"]:,}원</b>{note}</span></div>'
+                    f'<span class="what">{items} · <b>{r["금액"]:,}원</b></span></div>'
                 )
             totals = " · ".join(f"{d} {int(part[d].sum())}" for d in DISHES if part[d].sum())
             with st.container(key=f"grp_{i}"):
