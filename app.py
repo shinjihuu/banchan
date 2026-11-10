@@ -226,7 +226,7 @@ def to_excel(df: pd.DataFrame) -> bytes:
 # ----------------------------------------------------------------------------
 # 스타일 (휴대폰 세로 화면 기준)
 # ----------------------------------------------------------------------------
-st.set_page_config(page_title=APP_NAME, page_icon="🍱", layout="centered")
+st.set_page_config(page_title="수봉산 인도사랑 반찬가게", page_icon="🍱", layout="centered")
 
 st.markdown(
     """

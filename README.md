@@ -44,3 +44,12 @@ streamlit run app.py
 ## 데이터 저장 주의
 주문은 서버의 `orders.csv`에 저장됩니다. Streamlit Cloud는 앱이 재시작(재배포·장시간 미사용)되면 이 파일이 초기화되므로,
 마감 후 관리자 화면에서 **엑셀 다운로드**로 꼭 백업하세요.
+
+## 링크 공유 미리보기 (대표 사진·문구)
+Streamlit Cloud 주소(`banchan-sarang.streamlit.app`)는 미리보기를 바꿀 수 없어서,
+`docs/index.html` 안내 페이지(대표 사진 `docs/og.jpg`, 문구 "수봉산 인도사랑 반찬가게입니다")를 GitHub Pages로 띄우고
+열면 바로 앱으로 이동하게 했습니다.
+
+- 켜는 법: GitHub 저장소 **Settings → Pages → Build and deployment** → Source: `Deploy from a branch`, Branch: `main` / `/docs` → Save
+- 공유할 링크: **https://shinjihuu.github.io/banchan/**
+- 앱 주소가 바뀌면 `docs/index.html` 안의 `banchan-sarang.streamlit.app` 3곳을 바꿔 주세요.
