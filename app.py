@@ -17,7 +17,7 @@ import streamlit as st
 # ----------------------------------------------------------------------------
 PRICE = 10_000  # 반찬 1개당 가격 (원)
 
-GROUPS = [str(n) for n in range(4, 17)] + ["결새모"]  # 4 ~ 16, 결새모
+GROUPS = [str(n) for n in range(4, 17)] + ["결새모", "기타"]  # 4 ~ 16, 결새모, 기타
 
 APP_NAME = "인도사랑 반찬가게"
 PICKUP_NOTICE = "금요철야 예배 후까지 꼭 수령해주세요!"
@@ -69,7 +69,8 @@ def dish_visual(dish: str, cls: str = "dish-icon") -> str:
 
 
 def group_label(g: str) -> str:
-    return g if g == "결새모" else f"{g}전도회"
+    """숫자 전도회만 'N전도회'로, 결새모·기타는 그대로."""
+    return f"{g}전도회" if g.isdigit() else g
 
 
 def admin_password() -> str | None:
