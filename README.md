@@ -2,9 +2,6 @@
 
 휴대폰에서 반찬을 주문하는 Streamlit 앱입니다.
 
-- 주문 앱: https://indosarang-banchan.streamlit.app/
-- 공유용 링크 (카카오톡 미리보기): https://shinjihuu.github.io/banchan/
-
 ## 기능
 - **주문:** 전도회·이름(필수) 입력 → 반찬 담기 → 주문하기 (1개 10,000원)
 - **관리자:** 화면 맨 아래 🔒 관리자 → 전도회별 명단·집계, 주문 수정·삭제, 엑셀 다운로드
