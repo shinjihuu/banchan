@@ -152,6 +152,28 @@ def _gh_call(method: str, body: dict | None = None):
         raise StoreError(f"GitHub에 연결하지 못했어요 ({err})") from err
 
 
+def github_check() -> tuple[bool, str]:
+    """저장소 접근·쓰기 권한 점검 (관리자 화면용)."""
+    import requests
+
+    c = github_conf()
+    try:
+        r = requests.get(f"{c['api']}/repos/{c['repo']}", timeout=20,
+                         headers={"Authorization": f"Bearer {c['token']}", "Accept": "application/vnd.github+json"})
+    except Exception as err:
+        return False, f"GitHub에 연결하지 못했어요 ({err})"
+    if r.status_code == 401:
+        return False, "토큰이 올바르지 않거나 만료됐어요 (GITHUB_TOKEN 확인)"
+    if r.status_code == 404:
+        return False, f"저장소 `{c['repo']}`를 찾을 수 없어요. GITHUB_REPO 이름과, 토큰의 Repository access에 이 저장소가 들어 있는지 확인해 주세요"
+    if r.status_code != 200:
+        return False, f"GitHub 오류 ({r.status_code}: {r.text[:120]})"
+    perms = r.json().get("permissions") or {}
+    if perms and not perms.get("push"):
+        return False, "토큰에 쓰기 권한이 없어요. 토큰 Permissions → Contents 를 **Read and write** 로 바꿔 주세요"
+    return True, "ok"
+
+
 def _gh_read() -> tuple[pd.DataFrame, str | None]:
     """GitHub의 주문 파일과 그 버전(sha). 파일이 아직 없으면 빈 목록."""
     r = _gh_call("GET")
@@ -174,23 +196,26 @@ def _gh_write(df: pd.DataFrame, sha: str | None, message: str) -> None:
     if sha:
         body["sha"] = sha
     r = _gh_call("PUT", body)
-    if r.status_code == 409 or (r.status_code == 422 and "sha" in r.text):
-        raise _Conflict()  # 그 사이 다른 주문이 먼저 저장됨
+    conflict = (r.status_code == 409 and "empty" not in r.text.lower()) or (r.status_code == 422 and "sha" in r.text)
+    if conflict:
+        raise _Conflict(f"{r.status_code}: {r.text[:120]}")  # 그 사이 다른 주문이 먼저 저장됨
     if r.status_code not in (200, 201):
         raise StoreError(f"GitHub 저장 오류 ({r.status_code}: {r.text[:120]})")
 
 
 def _gh_update(change, message: str) -> pd.DataFrame:
     """최신 파일을 읽어 change(df)를 적용해 저장. 동시에 다른 주문이 저장되면 다시 읽어서 재시도."""
+    last = ""
     for _ in range(6):
         current, sha = _gh_read()
         new = change(current)
         try:
             _gh_write(new, sha, message)
             return new
-        except _Conflict:
+        except _Conflict as c:
+            last = str(c)
             continue
-    raise StoreError("동시에 주문이 많아 저장하지 못했어요")
+    raise StoreError(f"동시에 주문이 많아 저장하지 못했어요 ({last})")
 
 
 def _local_load() -> pd.DataFrame:
@@ -644,8 +669,9 @@ def order_page() -> None:
             st.rerun()
         try:
             ss.last_order = add_order(group, name, ss.cart)
-        except StoreError:
+        except StoreError as err:
             st.error("주문을 저장하지 못했어요. 잠시 후 다시 눌러 주세요.", icon="⚠️")
+            st.caption(f"오류 내용: {err}")
             st.stop()
         ss.cart = {d: 0 for d in DISHES}
         ss.form_ver += 1
@@ -673,6 +699,8 @@ def admin_page() -> None:
                    "(GitHub 저장소를 연결하면 안전하게 보관돼요)", icon="⚠️")
     elif ss.get("store_error"):
         st.error(f"{ss.store_error} — 잠시 서버 예비 사본을 보여 주고 있어요.", icon="⚠️")
+    elif not (chk := github_check())[0]:
+        st.error(f"GitHub 연결 문제: {chk[1]}", icon="⚠️")
     else:
         st.caption(f"✅ 주문이 GitHub에 저장되고 있어요 · "
                    f"[주문 파일 보기](https://github.com/{gh['repo']}/blob/{gh['branch'] or 'HEAD'}/{gh['path']}) · "
