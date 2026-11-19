@@ -18,13 +18,13 @@
 ## 주문 보관 (GitHub)
 주문이 들어올 때마다 **비공개 저장소의 `orders.csv`에 한 줄씩 커밋**됩니다. 앱이 재시작돼도 지워지지 않고, 커밋 기록이 곧 주문 로그입니다.
 
-1. GitHub에 **비공개(Private)** 저장소 만들기 (예: `banchan-orders`) — 이름이 공개되지 않도록 꼭 비공개로
+1. GitHub에 **비공개(Private)** 저장소 만들기 (`banchan-jumun`) — 이름이 공개되지 않도록 꼭 비공개로
 2. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token
-   - Repository access: `banchan-orders`만 선택
+   - Repository access: `banchan-jumun`만 선택
    - Permissions → Repository → **Contents: Read and write**
 3. Streamlit Cloud → Settings → **Secrets**에 추가
 ```toml
 GITHUB_TOKEN = "github_pat_..."
-GITHUB_REPO = "아이디/banchan-orders"
+GITHUB_REPO = "shinjihuu/banchan-jumun"
 ```
 - 내려받기: 관리자 화면의 **주문 파일 보기** 링크 → GitHub에서 Download (또는 관리자 화면 엑셀 다운로드)

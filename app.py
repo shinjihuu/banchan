@@ -96,7 +96,7 @@ def github_conf() -> dict | None:
     return {
         "token": token.strip(),
         "repo": repo.strip(),
-        "branch": (secret("GITHUB_BRANCH") or "main").strip(),
+        "branch": (secret("GITHUB_BRANCH") or "").strip() or None,  # 비우면 저장소 기본 브랜치
         "path": (secret("GITHUB_PATH") or "orders.csv").strip(),
         "api": (secret("GITHUB_API") or "https://api.github.com").rstrip("/"),
     }
@@ -145,7 +145,8 @@ def _gh_call(method: str, body: dict | None = None):
                "X-GitHub-Api-Version": "2022-11-28"}
     try:
         if method == "GET":
-            return requests.get(url, headers=headers, params={"ref": c["branch"]}, timeout=20)
+            params = {"ref": c["branch"]} if c["branch"] else None
+            return requests.get(url, headers=headers, params=params, timeout=20)
         return requests.put(url, headers=headers, json=body, timeout=30)
     except Exception as err:
         raise StoreError(f"GitHub에 연결하지 못했어요 ({err})") from err
@@ -166,8 +167,10 @@ def _gh_read() -> tuple[pd.DataFrame, str | None]:
 
 def _gh_write(df: pd.DataFrame, sha: str | None, message: str) -> None:
     c = github_conf()
-    body = {"message": message, "branch": c["branch"],
+    body = {"message": message,
             "content": base64.b64encode(df.to_csv(index=False).encode("utf-8-sig")).decode()}
+    if c["branch"]:
+        body["branch"] = c["branch"]
     if sha:
         body["sha"] = sha
     r = _gh_call("PUT", body)
@@ -672,8 +675,8 @@ def admin_page() -> None:
         st.error(f"{ss.store_error} — 잠시 서버 예비 사본을 보여 주고 있어요.", icon="⚠️")
     else:
         st.caption(f"✅ 주문이 GitHub에 저장되고 있어요 · "
-                   f"[주문 파일 보기](https://github.com/{gh['repo']}/blob/{gh['branch']}/{gh['path']}) · "
-                   f"[주문 기록](https://github.com/{gh['repo']}/commits/{gh['branch']}/{gh['path']})")
+                   f"[주문 파일 보기](https://github.com/{gh['repo']}/blob/{gh['branch'] or 'HEAD'}/{gh['path']}) · "
+                   f"[주문 기록](https://github.com/{gh['repo']}/commits/{gh['branch'] or 'HEAD'}/{gh['path']})")
     m1, m2, m3 = st.container(key="admin_metrics").columns(3)
     m1.metric("주문", f"{len(orders)}건")
     m2.metric("반찬", f"{int(orders[DISHES].to_numpy().sum())}개")
