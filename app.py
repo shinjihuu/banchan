@@ -88,10 +88,18 @@ def admin_password() -> str | None:
     return secret("ADMIN_PASSWORD")
 
 
-def sheet_conf() -> tuple[str, str] | None:
-    """구글 시트 저장소 설정 (SHEET_URL, SHEET_TOKEN). 없으면 서버 임시 파일에 저장."""
-    url, token = secret("SHEET_URL"), secret("SHEET_TOKEN")
-    return (url.strip(), token.strip()) if url and token else None
+def github_conf() -> dict | None:
+    """GitHub 저장소 설정. GITHUB_TOKEN, GITHUB_REPO 가 없으면 서버 임시 파일에 저장."""
+    token, repo = secret("GITHUB_TOKEN"), secret("GITHUB_REPO")
+    if not (token and repo):
+        return None
+    return {
+        "token": token.strip(),
+        "repo": repo.strip(),
+        "branch": (secret("GITHUB_BRANCH") or "main").strip(),
+        "path": (secret("GITHUB_PATH") or "orders.csv").strip(),
+        "api": (secret("GITHUB_API") or "https://api.github.com").rstrip("/"),
+    }
 
 
 # ----------------------------------------------------------------------------
@@ -119,35 +127,67 @@ def normalize(df: pd.DataFrame) -> pd.DataFrame:
     return df.reset_index(drop=True)
 
 
-# ---- 구글 시트 저장소 (tools/google_sheet_script.gs 를 시트에 붙여 배포한 웹 앱) ----
-SHEET_COLUMNS = COLUMNS  # 시트 첫 줄 제목과 같은 순서
-
-
-class SheetError(RuntimeError):
+# ---- GitHub 저장소: 주문 파일(orders.csv)을 비공개 저장소에 커밋. 주문 1건 = 커밋 1개 ----
+class StoreError(RuntimeError):
     pass
 
 
-def _sheet_request(method: str, payload: dict | None = None) -> dict:
+class _Conflict(Exception):
+    pass
+
+
+def _gh_call(method: str, body: dict | None = None):
     import requests
 
-    url, token = sheet_conf()
+    c = github_conf()
+    url = f"{c['api']}/repos/{c['repo']}/contents/{c['path']}"
+    headers = {"Authorization": f"Bearer {c['token']}", "Accept": "application/vnd.github+json",
+               "X-GitHub-Api-Version": "2022-11-28"}
     try:
         if method == "GET":
-            r = requests.get(url, params={"token": token}, timeout=20)
-        else:
-            r = requests.post(url, data=json.dumps({"token": token, **payload}),
-                              headers={"Content-Type": "text/plain;charset=utf-8"}, timeout=30)
-        data = r.json()
+            return requests.get(url, headers=headers, params={"ref": c["branch"]}, timeout=20)
+        return requests.put(url, headers=headers, json=body, timeout=30)
     except Exception as err:
-        raise SheetError(f"구글 시트에 연결하지 못했어요 ({err})") from err
-    if not data.get("ok"):
-        raise SheetError(f"구글 시트 오류: {data.get('error')}")
-    return data
+        raise StoreError(f"GitHub에 연결하지 못했어요 ({err})") from err
 
 
-def _sheet_rows(df: pd.DataFrame) -> list[dict]:
-    return [{k: (int(v) if k in DISHES or k == "금액" else str(v)) for k, v in r.items()}
-            for r in df[SHEET_COLUMNS].to_dict(orient="records")]
+def _gh_read() -> tuple[pd.DataFrame, str | None]:
+    """GitHub의 주문 파일과 그 버전(sha). 파일이 아직 없으면 빈 목록."""
+    r = _gh_call("GET")
+    if r.status_code == 404:
+        return normalize(pd.DataFrame(columns=COLUMNS)), None
+    if r.status_code != 200:
+        raise StoreError(f"GitHub 읽기 오류 ({r.status_code}: {r.text[:120]})")
+    data = r.json()
+    raw = base64.b64decode(data.get("content", "")).decode("utf-8-sig")
+    df = pd.read_csv(io.StringIO(raw), dtype=str) if raw.strip() else pd.DataFrame(columns=COLUMNS)
+    return normalize(df), data["sha"]
+
+
+def _gh_write(df: pd.DataFrame, sha: str | None, message: str) -> None:
+    c = github_conf()
+    body = {"message": message, "branch": c["branch"],
+            "content": base64.b64encode(df.to_csv(index=False).encode("utf-8-sig")).decode()}
+    if sha:
+        body["sha"] = sha
+    r = _gh_call("PUT", body)
+    if r.status_code == 409 or (r.status_code == 422 and "sha" in r.text):
+        raise _Conflict()  # 그 사이 다른 주문이 먼저 저장됨
+    if r.status_code not in (200, 201):
+        raise StoreError(f"GitHub 저장 오류 ({r.status_code}: {r.text[:120]})")
+
+
+def _gh_update(change, message: str) -> pd.DataFrame:
+    """최신 파일을 읽어 change(df)를 적용해 저장. 동시에 다른 주문이 저장되면 다시 읽어서 재시도."""
+    for _ in range(6):
+        current, sha = _gh_read()
+        new = change(current)
+        try:
+            _gh_write(new, sha, message)
+            return new
+        except _Conflict:
+            continue
+    raise StoreError("동시에 주문이 많아 저장하지 못했어요")
 
 
 def _local_load() -> pd.DataFrame:
@@ -166,20 +206,19 @@ def _local_write(df: pd.DataFrame) -> None:
 
 
 def load_orders() -> pd.DataFrame:
-    """주문 목록. 구글 시트가 설정돼 있으면 시트가 기준이고, 서버 파일은 예비 사본."""
-    if not sheet_conf():
+    """주문 목록. GitHub가 설정돼 있으면 GitHub 파일이 기준이고, 서버 파일은 예비 사본."""
+    if not github_conf():
         return _local_load()
     try:
-        rows = _sheet_request("GET")["rows"]
-    except SheetError as err:
-        st.session_state["sheet_error"] = str(err)
-        return _local_load()  # 시트에 잠깐 연결이 안 되면 예비 사본을 보여 줌
-    st.session_state.pop("sheet_error", None)
-    df = normalize(pd.DataFrame(rows[1:], columns=rows[0]) if rows else pd.DataFrame(columns=COLUMNS))
+        df, _ = _gh_read()
+    except StoreError as err:
+        st.session_state["store_error"] = str(err)
+        return _local_load()  # GitHub에 잠깐 연결이 안 되면 예비 사본을 보여 줌
+    st.session_state.pop("store_error", None)
     local = _local_load()
     if df.empty and not local.empty:
-        # 처음 연결할 때: 서버 파일에 있던 주문을 시트로 옮김
-        _sheet_request("POST", {"action": "replace", "rows": _sheet_rows(local)})
+        # 처음 연결할 때: 서버 파일에 있던 주문을 GitHub로 옮김
+        _gh_update(lambda _cur: local, "기존 주문 옮기기")
         return local
     _local_write(df)
     return df
@@ -187,8 +226,8 @@ def load_orders() -> pd.DataFrame:
 
 def write_orders(df: pd.DataFrame) -> None:
     """주문 목록 전체를 저장 (관리자 수정·복구용)."""
-    if sheet_conf():
-        _sheet_request("POST", {"action": "replace", "rows": _sheet_rows(df)})
+    if github_conf():
+        _gh_update(lambda _cur: df, "관리자 수정")
     _local_write(df)
 
 
@@ -217,9 +256,10 @@ def add_order(group: str, name: str, cart: dict[str, int]) -> dict:
     }
     order["금액"] = sum(int(order[d]) for d in DISHES) * PRICE
     with file_lock():
-        if sheet_conf():
-            # 시트에는 한 줄만 덧붙임 (동시에 여러 명이 주문해도 서로 덮어쓰지 않음)
-            _sheet_request("POST", {"action": "append", "row": _sheet_rows(pd.DataFrame([order]))[0]})
+        if github_conf():
+            # 최신 파일에 한 줄 덧붙여 커밋 (동시에 여러 명이 주문해도 서로 덮어쓰지 않음)
+            _gh_update(lambda cur: normalize(pd.concat([cur, pd.DataFrame([order])], ignore_index=True)),
+                       f"주문 {order['주문번호']} ({group_label(group)})")
         local = _local_load()
         _local_write(normalize(pd.concat([local, pd.DataFrame([order])], ignore_index=True)))
     log_event("ORDER", order)
@@ -601,7 +641,7 @@ def order_page() -> None:
             st.rerun()
         try:
             ss.last_order = add_order(group, name, ss.cart)
-        except SheetError:
+        except StoreError:
             st.error("주문을 저장하지 못했어요. 잠시 후 다시 눌러 주세요.", icon="⚠️")
             st.stop()
         ss.cart = {d: 0 for d in DISHES}
@@ -624,13 +664,16 @@ def admin_page() -> None:
         st.rerun()
 
     orders = load_orders()
-    if not sheet_conf():
+    gh = github_conf()
+    if not gh:
         st.warning("주문이 **서버 임시 파일**에 저장되고 있어요. 앱이 다시 시작되면 지워질 수 있으니 엑셀로 자주 받아 두세요. "
-                   "(구글 시트를 연결하면 안전하게 보관돼요)", icon="⚠️")
-    elif ss.get("sheet_error"):
-        st.error(f"{ss.sheet_error} — 잠시 서버 예비 사본을 보여 주고 있어요.", icon="⚠️")
+                   "(GitHub 저장소를 연결하면 안전하게 보관돼요)", icon="⚠️")
+    elif ss.get("store_error"):
+        st.error(f"{ss.store_error} — 잠시 서버 예비 사본을 보여 주고 있어요.", icon="⚠️")
     else:
-        st.caption("✅ 주문이 구글 시트에 저장되고 있어요.")
+        st.caption(f"✅ 주문이 GitHub에 저장되고 있어요 · "
+                   f"[주문 파일 보기](https://github.com/{gh['repo']}/blob/{gh['branch']}/{gh['path']}) · "
+                   f"[주문 기록](https://github.com/{gh['repo']}/commits/{gh['branch']}/{gh['path']})")
     m1, m2, m3 = st.container(key="admin_metrics").columns(3)
     m1.metric("주문", f"{len(orders)}건")
     m2.metric("반찬", f"{int(orders[DISHES].to_numpy().sum())}개")
@@ -708,7 +751,7 @@ def admin_page() -> None:
                     arrived = latest[~latest["주문번호"].isin(orders["주문번호"])]
                     saved = normalize(pd.concat([edited, arrived], ignore_index=True))
                     write_orders(saved)
-            except SheetError as err:
+            except StoreError as err:
                 st.error(f"저장하지 못했어요: {err}")
                 st.stop()
             log_event("ADMIN_SAVE", saved.to_dict(orient="records"))

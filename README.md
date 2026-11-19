@@ -15,14 +15,16 @@
 - **주문:** 전도회·이름(필수) 입력 → 반찬 담기 → 주문하기 (1개 10,000원)
 - **관리자:** 화면 맨 아래 🔒 관리자 → 전도회별 명단·집계, 주문 수정·삭제, 엑셀 다운로드
 
-## 주문 보관 (구글 시트)
-주문은 구글 시트에 한 줄씩 저장됩니다. 연결 전에는 서버 임시 파일에 저장되어 앱이 재시작되면 지워질 수 있습니다.
+## 주문 보관 (GitHub)
+주문이 들어올 때마다 **비공개 저장소의 `orders.csv`에 한 줄씩 커밋**됩니다. 앱이 재시작돼도 지워지지 않고, 커밋 기록이 곧 주문 로그입니다.
 
-1. 구글 시트를 새로 만들고 **확장 프로그램 → Apps Script**에 `tools/google_sheet_script.gs` 내용을 붙여넣기
-2. 맨 위 `TOKEN` 값을 아무도 모르는 긴 문자로 바꾸기
-3. **배포 → 새 배포 → 웹 앱** (실행: 나, 액세스: 모든 사용자) → 웹 앱 URL 복사
-4. Streamlit Cloud → Settings → **Secrets**에 추가
+1. GitHub에 **비공개(Private)** 저장소 만들기 (예: `banchan-orders`) — 이름이 공개되지 않도록 꼭 비공개로
+2. GitHub → Settings → Developer settings → **Fine-grained tokens** → Generate new token
+   - Repository access: `banchan-orders`만 선택
+   - Permissions → Repository → **Contents: Read and write**
+3. Streamlit Cloud → Settings → **Secrets**에 추가
 ```toml
-SHEET_URL = "복사한 웹 앱 URL"
-SHEET_TOKEN = "2번에서 정한 문자"
+GITHUB_TOKEN = "github_pat_..."
+GITHUB_REPO = "아이디/banchan-orders"
 ```
+- 내려받기: 관리자 화면의 **주문 파일 보기** 링크 → GitHub에서 Download (또는 관리자 화면 엑셀 다운로드)
