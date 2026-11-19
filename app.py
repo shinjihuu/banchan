@@ -1,6 +1,7 @@
 import base64
 import hmac
 import io
+import json
 import os
 import threading
 import uuid
@@ -151,7 +152,29 @@ def add_order(group: str, name: str, cart: dict[str, int]) -> dict:
         df = normalize(pd.concat([df, pd.DataFrame([order])], ignore_index=True))
         write_orders(df)
     order["금액"] = sum(cart.values()) * PRICE
+    log_event("ORDER", order)
     return order
+
+
+def log_event(kind: str, data) -> None:
+    """Streamlit Cloud 로그(Manage app → 로그)에 기록을 남김. 서버 파일이 지워졌을 때 복구용."""
+    print(f"[{kind}] {json.dumps(data, ensure_ascii=False, default=str)}", flush=True)
+
+
+def restore_orders(uploaded) -> int:
+    """백업 엑셀(.xlsx의 '전체 주문' 시트) 또는 CSV를 올려 주문을 되살림. 주문번호가 같은 건 건너뜀."""
+    if uploaded.name.lower().endswith(".csv"):
+        backup = pd.read_csv(uploaded, dtype=str)
+    else:
+        backup = pd.read_excel(uploaded, sheet_name="전체 주문", dtype=str)
+    backup = normalize(backup)
+    with file_lock():
+        current = load_orders()
+        new = backup[~backup["주문번호"].isin(current["주문번호"])]
+        if not new.empty:
+            write_orders(normalize(pd.concat([current, new], ignore_index=True)))
+    log_event("RESTORE", {"restored": len(new), "주문번호": list(new["주문번호"])})
+    return len(new)
 
 
 def group_order(df: pd.DataFrame) -> pd.DataFrame:
@@ -522,10 +545,7 @@ def order_page() -> None:
 def admin_page() -> None:
     hero("주문 관리", "전도회별 주문 현황")
 
-    c1, c2 = st.container(key="admin_top").columns(2)
-    if c1.button("🔄 새로고침", width="stretch"):
-        st.rerun()
-    if c2.button("🚪 로그아웃", width="stretch"):
+    if st.button("🚪 로그아웃", width="stretch"):
         ss.is_admin = False
         st.rerun()
 
@@ -604,9 +624,22 @@ def admin_page() -> None:
                 # 편집하는 동안 새로 들어온 주문은 그대로 유지
                 latest = load_orders()
                 arrived = latest[~latest["주문번호"].isin(orders["주문번호"])]
-                write_orders(normalize(pd.concat([edited, arrived], ignore_index=True)))
+                saved = normalize(pd.concat([edited, arrived], ignore_index=True))
+                write_orders(saved)
+            log_event("ADMIN_SAVE", saved.to_dict(orient="records"))
             st.success("저장했어요.")
             st.rerun()
+
+        st.divider()
+        st.markdown("**📤 백업으로 복구**")
+        st.caption("예전에 받아 둔 엑셀(또는 CSV)을 올리면 지금 목록에 없는 주문만 다시 넣어요.")
+        up = st.file_uploader("백업 파일", type=["xlsx", "csv"], label_visibility="collapsed")
+        if up is not None and st.button("복구하기", width="stretch"):
+            try:
+                n = restore_orders(up)
+                st.success(f"{n}건을 복구했어요.")
+            except Exception as err:
+                st.error(f"복구하지 못했어요: {err}")
 
 
 if ss.is_admin:
